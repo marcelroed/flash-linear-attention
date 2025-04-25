@@ -98,23 +98,15 @@ def chunk_gated_delta_rule(
     q = q * (d_k ** -0.5)
     v = v * beta[..., None]
     k_beta = k * beta[..., None]
-    should_match('qvk_beta', (q, v, k_beta))
     assert l % chunk_size == 0
-    # note that diagonal is masked.
     mask = jnp.arange(chunk_size)[:, None] <= jnp.arange(chunk_size)[None, :]
     q, k, v, k_beta, decay = map(lambda x: rearrange(x, 'b h (n c) d -> b h n c d', c = chunk_size), [q, k, v, k_beta, decay[..., None]])
     decay = decay.squeeze(-1).cumsum(-1)
     L_mask = jnp.exp(decay[..., None] - decay[..., None, :])
-    # attn = -((k_beta @ k.transpose(-1, -2)) * L_mask).masked_fill(mask, 0)
-    should_match('L_mask', (decay, L_mask, k_beta, k, mask))
-    should_match('k_beta@k', einsum(k_beta, k, '... i k, ... o k -> ...'))
-    # attn = -((k_beta @ jnp.matrix_transpose(k)) * L_mask).at[..., mask].set(0)
     attn = -jnp.where(mask[None, None, None, :, :], 0, (einsum(k_beta, k, '... i k, ... o k -> ... i o') * L_mask))
-    should_match('attn0', attn)
     for i in range(1, chunk_size):
       attn = attn.at[..., i, :i].add((attn[..., i, :i, None] * attn[..., :i, :i]).sum(-2))
     attn = attn + jnp.eye(chunk_size, dtype=jnp.float32)
-    should_match('attn1', attn)
     attn = attn
     k_cumsum = attn @ v
     attn = jnp.where(mask, 0, -((k_beta @ jnp.matrix_transpose(k))))
